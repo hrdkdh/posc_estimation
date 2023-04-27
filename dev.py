@@ -12,7 +12,6 @@ from utils.plots import colors, plot_one_box_kpt
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
-from PyQt5 import uic
 
 class VideoWorker(QThread):
     changePixmap = pyqtSignal(QImage)
@@ -25,27 +24,29 @@ class VideoWorker(QThread):
     @torch.no_grad()
     def run(self):
         weights="yolov7-w6-pose.pt"
-        device = select_device("cpu") #select device
+        device = select_device("0") #select device
 
-        strip_optimizer("cpu", "yolov7-w6-pose.pt")
+        strip_optimizer("0", "yolov7-w6-pose.pt")
 
         model = attempt_load(weights, map_location=device)  #Load model
-        _ = model.eval()
+        model.eval()
         names = model.module.names if hasattr(model, "module") else model.names  # get class names
         cap = cv2.VideoCapture(0)    #pass video to videocapture object
-        frame_width = int(cap.get(3))  #get video frame width
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.gui.cam_width)
         while True:
             ret, frame = cap.read()  #get frame and success from video capture
             if ret is False: #if success is true, means frame exist
                 break
-            img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) #convert frame to RGB
-            img = letterbox(img, (frame_width), stride=64, auto=True)[0]
-            img = transforms.ToTensor()(img)
-            img = torch.tensor(np.array([img.numpy()]))
-            img = img.to(device)  #convert img data to device
-            img = img.float() #convert img to float precision (cpu)
+            dst = cv2.resize(frame, dsize=(self.gui.cam_width, self.gui.cam_height), interpolation=cv2.INTER_AREA)
+            inp = cv2.resize(frame, (640, int((640*self.gui.cam_height)/self.gui.cam_width)))
+            inp = cv2.cvtColor(inp, cv2.COLOR_BGR2RGB) #convert frame to RGB
+            inp = letterbox(inp, (self.gui.cam_width), stride=64, auto=True)[0]
+            inp = transforms.ToTensor()(inp)
+            inp = torch.tensor(np.array([inp.numpy()]))
+            inp = inp.to(device)  #convert inp data to device
+            inp = inp.float() #convert inp to float precision (cpu)
             with torch.no_grad():  #get predictions
-                output_data, _ = model(img)
+                output_data, _ = model(inp)
             output_data = non_max_suppression_kpt(
                             output_data,
                             0.25,   # Conf. Threshold.
@@ -54,23 +55,18 @@ class VideoWorker(QThread):
                             nkpt=model.yaml["nkpt"], # Number of keypoints.
                             kpt_label=True)
         
-            im0 = img[0].permute(1, 2, 0) * 255 # Change format [b, c, h, w] to [h, w, c] for displaying the img.
-            im0 = im0.cpu().numpy().astype(np.uint8)
-            
-            im0 = cv2.cvtColor(im0, cv2.COLOR_RGB2BGR) #reshape img format to (BGR)
-
             for pose in output_data:  # detections per img
                 for det_index, (*xyxy, conf, cls) in enumerate(reversed(pose[:,:6])): #loop over poses for drawing on frame
                     c = int(cls)  # integer class
                     kpts = pose[det_index, 6:]
                     label = f"{names[c]} {conf:.2f}"
-                    plot_one_box_kpt(xyxy, im0, label=label, color=colors(c, True), 
-                                line_thickness=3, kpt_label=True, kpts=kpts, steps=3, 
-                                orig_shape=im0.shape[:2])
+                    plot_one_box_kpt(xyxy, dst, label=label, color=colors(c, True), 
+                                line_thickness=6, kpt_label=True, kpts=kpts, steps=3, 
+                                orig_shape=dst.shape[:2])
 
-            rgbImage = cv2.cvtColor(im0, cv2.COLOR_BGR2RGB)
+            rgbImage = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
             convertToQtFormat = QImage(rgbImage.data, rgbImage.shape[1], rgbImage.shape[0], QImage.Format_RGB888)
-            p = convertToQtFormat.scaled(400, 225, Qt.KeepAspectRatio)
+            p = convertToQtFormat.scaled(self.gui.cam_width, self.gui.cam_height, Qt.KeepAspectRatio)
             self.changePixmap.emit(p)
                     
             if self.stop_signal:
@@ -81,14 +77,16 @@ class VideoWorker(QThread):
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.width = 400
-        self.height = 300
+        self.width = 1600
+        self.height = 900
+        self.cam_width = 1280
+        self.cam_height = 720
         self.start()
 
     def start(self):
         self.setWindowTitle("ANGEL X")
         self.move(0, 0)
-        self.resize(800, 600)
+        self.resize(self.width, self.height)
 
         self.cb = QComboBox(self)
         self.cb.addItem("구동기 모드 선택")
@@ -111,7 +109,7 @@ class App(QWidget):
 
         self.label = QLabel(self)
         self.label.setText("no image")
-        self.label.resize(400, 225)
+        self.label.resize(self.cam_width, self.cam_height)
         grid.addWidget(self.label, 1, 0, 1, 2)
 
         self.center()
