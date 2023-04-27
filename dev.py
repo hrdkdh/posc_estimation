@@ -55,14 +55,21 @@ class VideoWorker(QThread):
                             nkpt=model.yaml["nkpt"], # Number of keypoints.
                             kpt_label=True)
         
-            for pose in output_data:  # detections per img
-                for det_index, (*xyxy, conf, cls) in enumerate(reversed(pose[:,:6])): #loop over poses for drawing on frame
-                    c = int(cls)  # integer class
-                    kpts = pose[det_index, 6:]
-                    label = f"{names[c]} {conf:.2f}"
-                    plot_one_box_kpt(xyxy, dst, label=label, color=colors(c, True), 
-                                line_thickness=6, kpt_label=True, kpts=kpts, steps=3, 
-                                orig_shape=dst.shape[:2])
+            # for pose in output_data:  # detections per img
+            #     for det_index, (*xyxy, conf, cls) in enumerate(reversed(pose[:,:6])): #loop over poses for drawing on frame
+            #         c = int(cls)  # integer class
+            #         kpts = pose[det_index, 6:]
+            #         label = f"{names[c]} {conf:.2f}"
+            #         plot_one_box_kpt(xyxy, dst, label=label, color=colors(c, True), 
+            #                     line_thickness=6, kpt_label=True, kpts=kpts, steps=3, 
+            #                     orig_shape=dst.shape[:2])
+            for det in output_data[0]:
+                if det[4] < 0.5:
+                    continue
+                for i in range(len(det)):
+                    if i in [6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54]:
+                        dst = cv2.circle(dst, (int(det[i]), int(det[i+1])), 3, (0, 255, 0), -1, cv2.LINE_AA)
+                        dst = cv2.putText(dst, "{:.2f}".format(det[i+2].item()), (int(det[i]+5), int(det[i+1]-4)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 1, cv2.LINE_AA)
 
             rgbImage = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
             convertToQtFormat = QImage(rgbImage.data, rgbImage.shape[1], rgbImage.shape[0], QImage.Format_RGB888)
